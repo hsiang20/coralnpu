@@ -25,8 +25,8 @@ package coralnpu_env_pkg;
   import coralnpu_axi_master_agent_pkg::*;
   import coralnpu_axi_slave_agent_pkg::*;
   import coralnpu_irq_agent_pkg::*;
-  import coralnpu_rvvi_agent_pkg::*;
-  import coralnpu_cosim_checker_pkg::*;
+  // import coralnpu_rvvi_agent_pkg::*;  // DISABLED: Depends on co-simulation infrastructure
+  // import coralnpu_cosim_checker_pkg::*;  // DISABLED: MPACT co-simulation not available
 
   //--------------------------------------------------------------------------
   // Class: coralnpu_env
@@ -38,8 +38,8 @@ package coralnpu_env_pkg;
     coralnpu_axi_master_agent m_master_agent; // Drives DUT Slave Port
     coralnpu_axi_slave_agent  m_slave_agent;  // Responds to DUT Master Port
     coralnpu_irq_agent        m_irq_agent;    // Drives IRQ/Control Signals
-    coralnpu_rvvi_agent       m_rvvi_agent;   // Passive agent for RVVI
-    coralnpu_cosim_checker    m_cosim_checker; // Manages co-simulation against MPACT simulator
+    // coralnpu_rvvi_agent       m_rvvi_agent;   // DISABLED: Depends on co-simulation infrastructure
+    // coralnpu_cosim_checker    m_cosim_checker; // DISABLED: MPACT co-simulation not available
 
     // Constructor
     function new(string name = "coralnpu_env", uvm_component parent = null);
@@ -55,8 +55,8 @@ package coralnpu_env_pkg;
       m_master_agent = coralnpu_axi_master_agent::type_id::create("m_master_agent", this);
       m_slave_agent  = coralnpu_axi_slave_agent::type_id::create("m_slave_agent", this);
       m_irq_agent    = coralnpu_irq_agent::type_id::create("m_irq_agent", this);
-      m_rvvi_agent   = coralnpu_rvvi_agent::type_id::create("m_rvvi_agent", this);
-      m_cosim_checker = coralnpu_cosim_checker::type_id::create("m_cosim_checker", this);
+      // m_rvvi_agent   = coralnpu_rvvi_agent::type_id::create("m_rvvi_agent", this);  // DISABLED
+      // m_cosim_checker = coralnpu_cosim_checker::type_id::create("m_cosim_checker", this);  // DISABLED
 
       `uvm_info(get_type_name(), "Build phase finished", UVM_MEDIUM)
     endfunction : build_phase

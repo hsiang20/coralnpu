@@ -6,9 +6,8 @@
 # Run command:
 # docker run -it coralnpu /bin/bash
 
-FROM debian:bookworm AS base
+FROM dsim
 
-ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 ARG _UID=1000
 ARG _GID=1000
@@ -36,7 +35,6 @@ RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
         python3 \
         python3-pip \
         srecord \
-        sudo \
         tzdata \
         unzip \
         xxd \
@@ -44,15 +42,15 @@ RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
     update-ca-certificates && \
     curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor > /tmp/bazel-archive-keyring.gpg && \
     mv /tmp/bazel-archive-keyring.gpg /usr/share/keyrings/ && \
-    echo "deb [arch=$(dpkg-architecture -q DEB_HOST_ARCH) signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list && \
+    echo "deb [arch=$(dpkg-architecture -q DEB_HOST_ARCH) signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" | tee /etc/apt/sources.list.d/bazel.list && \
     apt update && \
-    apt install bazel bazel-7.4.1 && \
-    echo "${_USERNAME} ALL=(ALL) NOPASSWD:/usr/bin/apt" >> /etc/sudoers.d/${_USERNAME} && \
-    echo "${_USERNAME} ALL=(ALL) NOPASSWD:/bin/mkdir" >> /etc/sudoers.d/${_USERNAME} && \
-    echo "${_USERNAME} ALL=(ALL) NOPASSWD:/bin/chown" >> /etc/sudoers.d/${_USERNAME} && \
-    echo "${_USERNAME} ALL=(ALL) NOPASSWD:/bin/ln" >> /etc/sudoers.d/${_USERNAME} && \
-    echo "${_USERNAME} ALL=(ALL) NOPASSWD:/usr/bin/xargs" >> /etc/sudoers.d/${_USERNAME} && \
-    addgroup --gid ${_GID} ${_USERNAME} && \
+    apt install bazel bazel-7.4.1
+
+# Install Python dependencies for UVM tests
+RUN pip3 install --no-cache-dir --break-system-packages pyelftools
+
+# Create builder user
+RUN addgroup --gid ${_GID} ${_USERNAME} && \
     adduser \
         --home ${HOME} \
         --disabled-password \
@@ -60,9 +58,13 @@ RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
         --uid ${_UID} \
         --gid ${_GID} \
         ${_USERNAME} && \
-    chown ${_USERNAME}:${_USERNAME} ${HOME}
+    chown ${_USERNAME}:${_USERNAME} ${HOME} && \
+    mkdir -p ${HOME}/.cache && \
+    chown -R ${_USERNAME}:${_USERNAME} ${HOME}/.cache
 # Work around differeing libmpfr versions between distros
 RUN ln -sf /lib/x86_64-linux-gnu/libmpfr.so.6.2.0 /lib/x86_64-linux-gnu/libmpfr.so.4
 USER ${_USERNAME}
-WORKDIR /home/${_USERNAME}/
-RUN git clone https://github.com/google-coral/coralnpu.git
+WORKDIR ${HOME}
+
+# Default to bash for interactive development
+CMD ["/bin/bash"]
