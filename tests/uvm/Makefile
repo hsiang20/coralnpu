@@ -14,15 +14,11 @@
 
 # Makefile for CoralNPU UVM Testbench
 
-
 # Workspace root (two levels up from tests/uvm/)
 WORKSPACE_ROOT := $(shell cd ../.. && pwd)
 
 # Check if CORALNPU_MPACT is set. If not, exit with an error.
 CORALNPU_MPACT = $(shell cd ../../../coralnpu-mpact && pwd)
-ifndef CORALNPU_MPACT
-    $(error CORALNPU_MPACT is not set. Please define it, e.g., export CORALNPU_MPACT=$(abspath ../../../coralnpu-mpact))
-endif
 
 # Generated RTL path
 BAZEL_BIN_DIR = $(shell cd $(WORKSPACE_ROOT) && bazel info bazel-bin)
@@ -34,10 +30,6 @@ DSIM = dsim
 CXX = clang++
 
 # UVM DV Directories
-COMMON_DIR = ./common
-TB_DIR = ./tb
-ENV_DIR = ./env
-TESTS_DIR = ./tests
 BIN_DIR = ./bin
 UTILS_DIR = ./utils
 
@@ -46,16 +38,18 @@ SIM_DIR = ./sim_work
 LOG_DIR = $(SIM_DIR)/logs
 
 # Waveform Dumping
+DUMP_WAVES = 0
 WAVE_DIR = $(SIM_DIR)/waves
 WAVE_FILE = $(WAVE_DIR)/$(UVM_TESTNAME).vcd
-DUMP_WAVES = 0
 
+# Memory files
 MEM_FILE_DIR = $(SIM_DIR)/mem_files
 RUN_OPTS_FILE = $(MEM_FILE_DIR)/elf_run_opts.f
 
 # MPACT-Sim Integration Paths
 MPACT_BAZEL_BIN_DIR = $(CORALNPU_MPACT)/bazel-bin/sim/cosim
 MPACT_COSIM_LIB_NAME = coralnpu_cosim_lib_static
+MPACT_COSIM_LIB_FILE = $(MPACT_BAZEL_BIN_DIR)/libcoralnpu_cosim_lib_static.a
 
 # File List for DSIM -f option
 FILE_LIST = ./coralnpu_dv.f
@@ -64,7 +58,7 @@ FILE_LIST = ./coralnpu_dv.f
 DSIM_WORK = dsim_work
 DSIM_IMAGE = image
 UVM_TESTNAME ?= coralnpu_base_test
-TEST_ELF ?= $(BIN_DIR)/riscv_rand_instr_test_0.elf
+TEST_ELF ?= $(BIN_DIR)/coralnpu_v2_program.elf
 LOG_FILENAME = test
 UVM_VERBOSITY ?= UVM_HIGH
 TEST_TIMEOUT_NS ?= 100000
@@ -91,10 +85,7 @@ DSIM_COMPILE_OPTS = \
 DSIM_RUN_OPTS = \
 	$(PLUSARGS) \
 	-f $(RUN_OPTS_FILE) \
-	-sv_lib ${UVM_HOME}/src/dpi/libuvm_dpi.so \
-	-y $(MPACT_BAZEL_BIN_DIR) \
-	-v $(MPACT_COSIM_LIB_NAME) \
-	+incdir+dir[+$(CORALNPU_MPACT)]
+	-sv_lib ${UVM_HOME}/src/dpi/libuvm_dpi.so
 
 # Add define to COMPILE options for waveform dumping
 ifeq ($(DUMP_WAVES),1)
@@ -137,7 +128,10 @@ rtl:
 # Compile the design (removed build_mpact_lib dependency since CORALNPU_MPACT is not set)
 compile: $(FILE_LIST) dirs rtl build_mpact_lib
 	@echo "--- Compiling with dsim ---"
-	$(DSIM) $(DSIM_COMPILE_OPTS) -l $(LOG_DIR)/compile.log -work $(DSIM_WORK) -genimage $(DSIM_IMAGE) -f $(FILE_LIST) $(GENERATED_RTL_SRC)
+	$(DSIM) $(DSIM_COMPILE_OPTS) -l $(LOG_DIR)/compile.log -work $(DSIM_WORK) -f $(FILE_LIST) $(GENERATED_RTL_SRC)
+	# Manual linking of the MPACT-Sim library
+	@echo "--- Linking Design and Co-sim libraries ---"
+	g++ -shared -Bsymbolic -o $(DSIM_WORK)/$(DSIM_IMAGE).so $(DSIM_WORK)/obj/*o -Wl,--whole-archive $(MPACT_COSIM_LIB_FILE) -Wl,--no-whole-archive -lstdc++
 	@echo "--- Compilation Finished ---"
 
 # Run the simulation
@@ -158,7 +152,7 @@ endif
 # Clean up simulation files
 clean:
 	@echo "--- Cleaning Simulation Files ---"
-	rm -rf $(SIM_DIR) $(DSIM_WORK) $(GENERATED_RTL_SRC).tmp simv* dsim* csrc* *.log* *.key *.vpd *.vcd *.fsdb *.mxd *.db ucli.key DVEfiles/ verdiLog/ novas.* work/
+	rm -rf $(SIM_DIR) $(DSIM_WORK) $(GENERATED_RTL_SRC).tmp simv* csrc* *.log* *.key *.vpd *.fsdb ucli.key DVEfiles/ verdiLog/ novas.*
 	cd $(WORKSPACE_ROOT)
 	bazel clean --expunge
 	# @echo "--- Cleaning MPACT-Sim Bazel cache ---"
