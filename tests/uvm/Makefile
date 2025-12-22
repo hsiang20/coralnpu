@@ -53,14 +53,6 @@ WAVE_DIR = $(SIM_DIR)/waves
 MEM_FILE_DIR = $(SIM_DIR)/mem_files
 RUN_OPTS_FILE = $(MEM_FILE_DIR)/elf_run_opts.f
 
-# Tool-specific work directories and executables
-ifeq ($(SIMTOOL),dsim)
-    DSIM_WORK = dsim_work
-    DSIM_IMAGE = image
-else ifeq ($(SIMTOOL),vcs)
-    SIM_EXEC = $(SIM_DIR)/simv
-endif
-
 # MPACT-Sim Integration Paths
 MPACT_BAZEL_BIN_DIR = $(CORALNPU_MPACT)/bazel-bin/sim/cosim
 MPACT_COSIM_LIB_NAME = coralnpu_cosim_lib_static
@@ -70,6 +62,12 @@ MPACT_COSIM_LIB_FILE = $(MPACT_BAZEL_BIN_DIR)/lib$(MPACT_COSIM_LIB_NAME).a
 FILE_LIST = ./coralnpu_dv.f
 
 # Simulation Settings
+ifeq ($(SIMTOOL),dsim)
+    DSIM_WORK = dsim_work
+    DSIM_IMAGE = image
+else ifeq ($(SIMTOOL),vcs)
+    SIM_EXEC = $(SIM_DIR)/simv
+endif
 UVM_TESTNAME ?= coralnpu_base_test
 TEST_ELF ?= $(BIN_DIR)/program.elf
 LOG_FILENAME ?= test
@@ -89,10 +87,6 @@ endif
 
 # Simulator-specific Compilation and Run Options
 ifeq ($(SIMTOOL),dsim)
-    # DSim Compilation Options
-    # Note: UVM_HOME and DSIM_HOME are set in the Docker environment
-    # UVM_HOME=/root/AltairDSim/2025/uvm/1.2/
-    # DSIM_HOME=/root/AltairDSim/2025
     COMPILE_OPTS = \
 			-sv \
 			+define+UVM_NO_DEPRECATED \
@@ -101,7 +95,6 @@ ifeq ($(SIMTOOL),dsim)
 			-sv_lib ${UVM_HOME}/src/dpi/libuvm_dpi.so \
 			-uvm default \
 			-noopt \
-			+acc+b -waves $(WAVE_FILE) \
 			-c-opts "-I$(CORALNPU_MPACT) -std=c++17" \
 			-ld-opts "-L$(MPACT_BAZEL_BIN_DIR) -l$(MPACT_COSIM_LIB_NAME)"
     
@@ -110,13 +103,12 @@ ifeq ($(SIMTOOL),dsim)
 			-f $(RUN_OPTS_FILE) \
 			-sv_lib ${UVM_HOME}/src/dpi/libuvm_dpi.so
     
-    # Add waveform dumping for dsim
     ifeq ($(DUMP_WAVES),1)
+				COMPILE_OPTS += +acc+b -waves $(WAVE_FILE)
         RUN_OPTS += -waves $(WAVE_FILE)
     endif
 
 else ifeq ($(SIMTOOL),vcs)
-    # VCS Compilation Options
     COMPILE_OPTS = \
 			-full64 \
 			-sverilog \
@@ -136,14 +128,12 @@ else ifeq ($(SIMTOOL),vcs)
 		$(PLUSARGS) \
 		-f $(RUN_OPTS_FILE)
     
-    # Add define to COMPILE options for waveform dumping
     ifeq ($(DUMP_WAVES),1)
         COMPILE_OPTS += +define+DUMP_WAVES
         RUN_OPTS += +fsdb+all +fsdbfile+$(WAVE_FILE)
     endif
 endif
 
-# Targets
 .PHONY: all compile compile-dsim compile-vcs run clean dirs help build_mpact_lib gen_mem_files rtl
 
 # Default target, builds and then runs.
@@ -177,11 +167,13 @@ rtl:
 	bazel build //hdl/chisel/src/coralnpu:rvv_core_mini_verification_axi_cc_library_emit_verilog
 ifeq ($(SIMTOOL),dsim)
 	@echo "--- Fixing Chisel-generated code for DSim compatibility ---"
-	sed -i 's/:\/\/\(.*\)/: \/\/\1/g' $(GENERATED_RTL_SRC)
-	@echo "--- Renaming duplicate SRAM module definitions ---"
-	python3 $(UTILS_DIR)/rename_duplicate_sram_modules.py $(GENERATED_RTL_SRC) $(GENERATED_RTL_SRC).tmp
-	rm -f $(GENERATED_RTL_SRC)
-	mv $(GENERATED_RTL_SRC).tmp $(GENERATED_RTL_SRC)
+	sed -i \
+		-e 's/:\/\/\(.*\)/: \/\/\1/g' \
+		-e 's/^module\s\+SRAM_512x128\b/module SRAM_512x128_wrapper/' \
+		-e 's/^module\s\+SRAM_2048x128\b/module SRAM_2048x128_wrapper/' \
+		-e 's/\(\s\+\)SRAM_512x128\(\s\+\w\+\s*(\)/\1SRAM_512x128_wrapper\2/g' \
+		-e 's/\(\s\+\)SRAM_2048x128\(\s\+\w\+\s*(\)/\1SRAM_2048x128_wrapper\2/g' \
+		$(GENERATED_RTL_SRC)
 endif
 
 # DSim-specific compilation
