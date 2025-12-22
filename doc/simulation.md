@@ -49,7 +49,6 @@ export CORALNPU_MPACT=${PATH_TO_coralnpu-mpact}
 
 ### Build Images
 ```
-docker build --platform linux/amd64 -f utils/dsim.dockerfile -t dsim .
 docker build --platform linux/amd64 -f utils/coralnpu-dsim.dockerfile -t coralnpu-dsim .
 ```
 
