@@ -104,7 +104,7 @@ ifeq ($(SIMTOOL),dsim)
 			-sv_lib ${UVM_HOME}/src/dpi/libuvm_dpi.so
     
     ifeq ($(DUMP_WAVES),1)
-				COMPILE_OPTS += +acc+b -waves $(WAVE_FILE)
+        COMPILE_OPTS += +acc+b -waves $(WAVE_FILE)
         RUN_OPTS += -waves $(WAVE_FILE)
     endif
 
