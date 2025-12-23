@@ -244,7 +244,7 @@ module coralnpu_tb_top;
                                    tohost_written_event);
 
     // Load memories at time 0
-    #5;
+    #0;
     if ($value$plusargs("ITCM_MEM_FILE=%s", itcm_mem_file)) begin
       `uvm_info("TB_TOP", $sformatf("Loading ITCM from %s", itcm_mem_file), UVM_LOW)
       $readmemh(itcm_mem_file, coralnpu_tb_top.u_dut.itcm.sram.sramModules_0.mem);
