@@ -119,7 +119,7 @@ object LsuOp extends ChiselEnum {
     val halfAligned = (address(0) === 0.U)
     val wordAligned = (address(1, 0) === 0.U)
 
-    val size = MuxCase(16.U, Seq(
+    val size = MuxUpTo1H(16.U, Seq(
       op.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.SB) -> 1.U,
       op.isOneOf(LsuOp.LH, LsuOp.LHU, LsuOp.SH) -> Mux(halfAligned, 2.U, 16.U),
       op.isOneOf(LsuOp.LW, LsuOp.SW, LsuOp.FLOAT) ->
@@ -130,7 +130,7 @@ object LsuOp extends ChiselEnum {
     val halfAlignedAddress = address(31, 1) << 1.U
     val wordAlignedAddress = address(31, 2) << 2.U
     val lineAlignedAddress = address(31, 4) << 4.U
-    val alignedAddress = MuxCase(lineAlignedAddress, Seq(
+    val alignedAddress = MuxUpTo1H(lineAlignedAddress, Seq(
       op.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.SB) -> address,
       (op.isOneOf(LsuOp.LH, LsuOp.LHU, LsuOp.SH) && halfAligned) ->
           halfAlignedAddress,
@@ -224,7 +224,7 @@ object LsuUOp {
       val lmul = rvvState.get.bits.lmul
       // TODO(davidgao): Add checks for illegal LMUL values in the frontend.
       // Unit-stride, const-stride. Default value applies when eew == sew.
-      val emul_data = MuxCase(lmul, Seq(
+      val emul_data = MuxUpTo1H(lmul, Seq(
           // eew == 1/4 sew
           (eew === "b000".U && sew === "b010".U) -> (lmul - 2.U),
           // eew == 1/2 sew
@@ -242,7 +242,7 @@ object LsuUOp {
           cmd.isMaskOperation() -> 0.U,
           // Section 7.9 of RVV Spec: "The nf field encodes how many vector
           // registers to load and store".
-          cmd.isWholeRegister() -> MuxCase(0.U, Seq(
+          cmd.isWholeRegister() -> MuxUpTo1H(0.U, Seq(
               (cmd.nfields.get === 0.U) -> 0.U,  // NF1 -> LMUL1
               (cmd.nfields.get === 1.U) -> 1.U,  // NF2 -> LMUL2
               (cmd.nfields.get === 3.U) -> 2.U,  // NF4 -> LMUL4
@@ -253,7 +253,7 @@ object LsuUOp {
       ))
 
       // If mask operation, force fields to zero
-      result.nfields.get := MuxCase(cmd.nfields.get, Seq(
+      result.nfields.get := MuxUpTo1H(cmd.nfields.get, Seq(
           cmd.isMaskOperation() -> 0.U,
           cmd.isWholeRegister() -> 0.U,
       ))
@@ -269,7 +269,7 @@ object ComputeStridedAddrs {
             baseAddr: UInt,
             stride: UInt,
             elemWidth: UInt): Vec[UInt] = {
-    MuxCase(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
+    MuxUpTo1H(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
       // elemWidth validation is done at decode time.
       // TODO: pass this as an enum.
       (elemWidth === "b000".U) -> VecInit((0 until bytesPerSlot).map(
@@ -292,7 +292,7 @@ object ComputeIndexedAddrs {
     val indices16 = UIntToVec(indices, 16).map(x => Cat(0.U(16.W), x))
     val indices32 = UIntToVec(indices, 32)
 
-    val indices_v = MuxCase(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
+    val indices_v = MuxUpTo1H(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
       // 8-bit indices.
       (indexWidth === "b000".U) -> VecInit(indices8),
       // 16-bit indices.
@@ -302,7 +302,7 @@ object ComputeIndexedAddrs {
           indices32 ++ indices32 ++ indices32 ++ indices32),
     ))
 
-    MuxCase(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
+    MuxUpTo1H(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
       // elemWidth validation is done at decode time.
       // 8-bit data. Each byte has its own offset.
       (sew === "b000".U) -> VecInit((0 until bytesPerSlot).map(
@@ -362,9 +362,9 @@ class LsuVectorLoop extends Bundle {
 }
 
 // bytesPerSlot is the number of bytes in a vector register
-// bytesPerLine is the number of bytes in the AXI bus
-class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
-  val elemBits = log2Ceil(bytesPerLine)
+// p.lsuDataBytes is the number of bytes in the AXI bus
+class LsuSlot(p: Parameters, bytesPerSlot: Int) extends Bundle {
+  val elemBits = log2Ceil(p.lsuDataBytes)
 
   val op = LsuOp()
   val rd = UInt(5.W)
@@ -419,7 +419,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
   }
 
   def vectorUpdate(updated: Bool, rvv2lsu: Rvv2Lsu): LsuSlot = {
-    val result = Wire(new LsuSlot(bytesPerSlot, bytesPerLine))
+    val result = Wire(new LsuSlot(p, bytesPerSlot))
     result.op := op
     result.rd := rd
     result.store := store
@@ -432,7 +432,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
 
     val segmentBaseAddr = baseAddr + (segmentStride * vectorLoop.segment.curr)(31, 0)
     val bitsPerSlot = bytesPerSlot * 8
-    val indices = MuxCase(rvv2lsu.idx.bits.data, Seq(
+    val indices = MuxUpTo1H(rvv2lsu.idx.bits.data, Seq(
         // 2 of 2
         ((vectorLoop.indexParition.curr === 1.U) && (vectorLoop.indexParition.max === 1.U)) -> (rvv2lsu.idx.bits.data(bitsPerSlot - 1, bitsPerSlot / 2)),
         // 2 of 4
@@ -442,7 +442,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
         // 4 of 4
         ((vectorLoop.indexParition.curr === 3.U) && (vectorLoop.indexParition.max === 3.U)) -> (rvv2lsu.idx.bits.data(bitsPerSlot - 1, bitsPerSlot * 3 / 4)),
     ))
-    result.addrs := MuxCase(addrs, Seq(
+    result.addrs := MuxUpTo1H(addrs, Seq(
         op.isOneOf(LsuOp.VLOAD_UNIT, LsuOp.VSTORE_UNIT) ->
             ComputeStridedAddrs(bytesPerSlot, segmentBaseAddr, elemStride, elemWidth),
         op.isOneOf(LsuOp.VLOAD_STRIDED, LsuOp.VSTORE_STRIDED) ->
@@ -484,7 +484,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
     val lineDataVec = UIntToVec(lineData, 8)
     val gatheredData = Gather(elemAddresses(), lineDataVec)
 
-    val result = Wire(new LsuSlot(bytesPerSlot, bytesPerLine))
+    val result = Wire(new LsuSlot(p, bytesPerSlot))
     result.op := op
     result.rd := rd
     result.store := store
@@ -514,7 +514,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
 
   // Updates the slot if its result is written back to the regfile.
   def writebackUpdate(writeback: Bool): LsuSlot = {
-    val result = Wire(new LsuSlot(bytesPerSlot, bytesPerLine))
+    val result = Wire(new LsuSlot(p, bytesPerSlot))
     result.op := op
     result.store := store
     result.pc := pc
@@ -546,7 +546,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
       op.isOneOf(LsuOp.VLOAD_UNIT, LsuOp.VSTORE_UNIT) ->
           (baseAddr + (vectorLoop.segment.max * 16.U) + 16.U),
       op.isOneOf(LsuOp.VLOAD_STRIDED, LsuOp.VSTORE_STRIDED) ->
-          MuxCase(baseAddr + (elemStride * bytesPerSlot.U), Seq(
+          MuxUpTo1H(baseAddr + (elemStride * bytesPerSlot.U), Seq(
             (elemWidth === "b000".U) ->
                 (baseAddr + (elemStride * bytesPerSlot.U)),
             (elemWidth === "b101".U) ->
@@ -573,7 +573,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
 
   def storeUpdate(selected: Vec[Bool]): LsuSlot = {
     assert(selected.length == active.length)
-    val result = Wire(new LsuSlot(bytesPerSlot, bytesPerLine))
+    val result = Wire(new LsuSlot(p, bytesPerSlot))
     result.op := op
     result.rd := rd
     result.store := store
@@ -601,13 +601,13 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
     halfSigned := half.asSInt
     val byteSigned = Wire(SInt(32.W))
     byteSigned := byte.asSInt
-    MuxCase(0.U, Seq(
-      (op === LsuOp.LB) -> byteSigned.asUInt,
-      (op === LsuOp.LBU) -> byte,
-      (op === LsuOp.LH) -> halfSigned.asUInt,
-      (op === LsuOp.LHU) -> half,
-      (op === LsuOp.LW) -> word,
-      (op === LsuOp.FLOAT) -> word,
+    MuxLookup(op, 0.U)(Seq(
+      LsuOp.LB -> byteSigned.asUInt,
+      LsuOp.LBU -> byte,
+      LsuOp.LH -> halfSigned.asUInt,
+      LsuOp.LHU -> half,
+      LsuOp.LW -> word,
+      LsuOp.FLOAT -> word,
     ))
   }
 
@@ -624,11 +624,11 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
 
 object LsuSlot {
   def inactive(p: Parameters, bytesPerSlot: Int): LsuSlot = {
-    0.U.asTypeOf(new LsuSlot(bytesPerSlot, p.lsuDataBytes))
+    0.U.asTypeOf(new LsuSlot(p, bytesPerSlot))
   }
 
   def fromLsuUOp(uop: LsuUOp, p: Parameters, bytesPerSlot: Int): LsuSlot = {
-    val result = Wire(new LsuSlot(bytesPerSlot, p.lsuDataBytes))
+    val result = Wire(new LsuSlot(p, bytesPerSlot))
     result.op := uop.op
     result.rd := uop.rd
     result.store := uop.store
@@ -644,7 +644,7 @@ object LsuSlot {
       // indexed loads. This occurs when the index dtype is greater than data
       // dtype.
       val elemWidth = uop.elemWidth.get
-      val elemMultiplier = MuxCase(1.U, Seq(
+      val elemMultiplier = MuxUpTo1H(1.U, Seq(
         // 8-bit data, 16-bit indices
         ((elemWidth === "b101".U) && (uop.sew.get === 0.U)) -> 2.U,
         // 8-bit data, 32-bit indices
@@ -652,13 +652,13 @@ object LsuSlot {
         // 16-bit data, 32-bit indices
         ((elemWidth === "b110".U) && (uop.sew.get === 1.U)) -> 2.U,
       ))
-      val max_subvector = MuxCase(0.U, Seq(
+      val max_subvector = MuxUpTo1H(0.U, Seq(
         ((elemMultiplier === 2.U) && (uop.emul_data.get.asSInt >= 0.S)) -> 1.U,
         ((elemMultiplier === 4.U) && (uop.emul_data.get.asSInt >= 0.S)) -> 3.U,
         ((elemMultiplier === 4.U) && (uop.emul_data.get.asSInt === -1.S)) -> 1.U,
       ))
       // [0..x] data vecs we can operate on with one index vec
-      val indexParitions = MuxCase(0.U, Seq(
+      val indexParitions = MuxUpTo1H(0.U, Seq(
         // 16-bit data, 8-bit indices
         ((elemWidth === "b000".U) && (uop.sew.get === 1.U)) -> 1.U,
         // 32-bit data, 8-bit indices
@@ -686,7 +686,7 @@ object LsuSlot {
     result.pendingWriteback := !uop.store || LsuOp.isVector(uop.op)
     result.pendingVector := LsuOp.isVector(uop.op)
 
-    val active = MuxCase(0.U(bytesPerSlot.W), Seq(
+    val active = MuxUpTo1H(0.U(bytesPerSlot.W), Seq(
       uop.op.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.SB) -> "b1".U(bytesPerSlot.W),
       uop.op.isOneOf(LsuOp.LH, LsuOp.LHU, LsuOp.SH) -> "b11".U(bytesPerSlot.W),
       uop.op.isOneOf(LsuOp.LW, LsuOp.SW, LsuOp.FLOAT) -> "b1111".U(bytesPerSlot.W),
@@ -708,13 +708,13 @@ object LsuSlot {
         uop.op.isOneOf(LsuOp.VLOAD_OINDEXED, LsuOp.VLOAD_UINDEXED,
                        LsuOp.VSTORE_OINDEXED, LsuOp.VSTORE_UINDEXED),
         // Indexed load. The unit stride also controls segment stride.
-        MuxCase(1.U, Seq(
+        MuxUpTo1H(1.U, Seq(
             (result.sew === "b000".U) -> 1.U,  // 1-byte elements
             (result.sew === "b001".U) -> 2.U,  // 2-byte elements
             (result.sew === "b010".U) -> 4.U,  // 4-byte elements
         )),
         // Non-indexed load.
-        MuxCase(1.U, Seq(
+        MuxUpTo1H(1.U, Seq(
             (uop.elemWidth.getOrElse(3.U) === "b000".U) -> 1.U,  // 1-byte elements
             (uop.elemWidth.getOrElse(3.U) === "b101".U) -> 2.U,  // 2-byte elements
             (uop.elemWidth.getOrElse(3.U) === "b110".U) -> 4.U,  // 4-byte elements
@@ -882,6 +882,7 @@ class LsuV2(p: Parameters) extends Lsu(p) {
 
   // ==========================================================================
   // Transaction update
+  val faultReg = RegInit(MakeInvalid(new FaultInfo(p)))
 
   // First stage of load update: Update results based on bus read
   val loadUpdatedSlot = slot.loadUpdate(
@@ -907,13 +908,13 @@ class LsuV2(p: Parameters) extends Lsu(p) {
   val (opSize, alignedAddress) = LsuOp.opSize(slot.op, targetAddress.bits)
 
   // ibus data path
-  io.ibus.valid := loadUpdatedSlot.activeTransaction() && itcm && !slot.store
+  io.ibus.valid := loadUpdatedSlot.activeTransaction() && itcm && !slot.store && !faultReg.valid
   io.ibus.addr := targetLineAddr
 
   // dbus data path
   io.dbus.valid := dtcm && Mux(slot.store,
                                slot.activeTransaction(),
-                               loadUpdatedSlot.activeTransaction())
+                               loadUpdatedSlot.activeTransaction()) && !faultReg.valid
   io.dbus.write := slot.store
   io.dbus.pc := slot.pc
   io.dbus.addr := targetLineAddr
@@ -925,7 +926,7 @@ class LsuV2(p: Parameters) extends Lsu(p) {
   // ebus data path
   io.ebus.dbus.valid := (external || peri) && Mux(slot.store,
                                                   slot.activeTransaction(),
-                                                  loadUpdatedSlot.activeTransaction())
+                                                  loadUpdatedSlot.activeTransaction()) && !faultReg.valid
   io.ebus.dbus.write := slot.store
   io.ebus.dbus.addr := alignedAddress
   io.ebus.dbus.adrx := targetLineAddr
@@ -956,7 +957,8 @@ class LsuV2(p: Parameters) extends Lsu(p) {
   ibusFault.bits.addr := targetLineAddr
   ibusFault.bits.epc := slot.pc
 
-  io.fault := MuxCase(MakeInvalid(new FaultInfo(p)), Seq(
+  io.fault := faultReg
+  faultReg := MuxCase(MakeInvalid(new FaultInfo(p)), Seq(
       io.ebus.fault.valid -> io.ebus.fault,
       ibusFault.valid -> ibusFault,
   ))
@@ -966,8 +968,15 @@ class LsuV2(p: Parameters) extends Lsu(p) {
   val transactionUpdatedSlot = Mux(slot.store,
       slot.storeUpdate(storeUpdate), loadUpdatedSlot)
   val lsu2RvvFire = if (p.enableRvv) { io.lsu2rvv.get(0).fire } else { false.B }
-  val storeComplete = slotFired && slot.store && !slot.slotIdle() && transactionUpdatedSlot.slotIdle() &&
-    (!LsuOp.isVector(slot.op) || lsu2RvvFire)
+  // For scalar stores: complete when transaction is done (slotFired && all bytes written)
+  // For vector stores: complete when lsu2rvv handshake fires with last=1
+  // These happen in different cycles, so we can't AND them together.
+  val scalarStoreComplete = slotFired && slot.store && !slot.slotIdle() &&
+      transactionUpdatedSlot.slotIdle() && !LsuOp.isVector(slot.op)
+  val vectorStoreComplete = if (p.enableRvv) {
+      lsu2RvvFire && io.lsu2rvv.get(0).bits.last
+  } else { false.B }
+  val storeComplete = scalarStoreComplete || vectorStoreComplete
   io.storeComplete := Mux(storeComplete, MakeValid(slot.pc), MakeInvalid(UInt(32.W)))
 
   // ==========================================================================
@@ -975,7 +984,7 @@ class LsuV2(p: Parameters) extends Lsu(p) {
 
   // Scalar writeback
   // Write back on error. io.fault.valid will mask
-  io.rd.valid := (io.fault.valid || slot.shouldWriteback()) &&
+  io.rd.valid := (faultReg.valid || slot.shouldWriteback()) &&
       slot.op.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.LH, LsuOp.LHU, LsuOp.LW)
   io.rd.bits.data := slot.scalarLoadResult()
   io.rd.bits.addr := slot.rd
@@ -1016,7 +1025,7 @@ class LsuV2(p: Parameters) extends Lsu(p) {
   // Slot update
   val slotNext = MuxCase(slot, Seq(
     // Move to inactive if error.
-    io.fault.valid -> LsuSlot.inactive(p, 16),
+    faultReg.valid -> LsuSlot.inactive(p, 16),
     // When inactive, dequeue if possible
     (slot.slotIdle() && (opQueue.io.nEnqueued > 0.U)) -> nextSlot,
     // Vector update.

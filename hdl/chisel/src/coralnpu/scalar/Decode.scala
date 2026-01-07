@@ -26,32 +26,6 @@ import common._
 import coralnpu.float.{FloatInstruction, FloatOpcode}
 import coralnpu.rvv._
 
-class DecodeSerializeIO extends Bundle {
-  val lsu = Output(Bool())
-  val mul = Output(Bool())
-  val jump = Output(Bool())
-  val brcond = Output(Bool())
-  val vinst = Output(Bool())     // all vector instructions
-  val wfi = Output(Bool())
-  val fence = Output(Bool())
-  val csr = Output(Bool())
-  val undef = Output(Bool())
-  val float = Output(Bool())
-
-  def defaults() = {
-    lsu := false.B
-    mul := false.B
-    jump := false.B
-    brcond := false.B
-    vinst := false.B
-    wfi := false.B
-    fence := false.B
-    csr := false.B
-    undef := false.B
-    float := false.B
-  }
-}
-
 class DecodedInstruction(p: Parameters) extends Bundle {
   // The original encoding
   val inst = UInt(32.W)
@@ -302,9 +276,9 @@ class Dispatch(p: Parameters) extends Module {
     val rvvIdle = Option.when(p.enableRvv)(Input(Bool()))
     val rvvQueueCapacity = Option.when(p.enableRvv)(Input(UInt(4.W)))
 
-    val float = if (p.enableFloat) {
-      Some(Decoupled(new FloatInstruction))
-    } else { None }
+    // Float interface
+    val float = Option.when(p.enableFloat)(Decoupled(new FloatInstruction))
+    val csrFrm = Option.when(p.enableFloat)(Input(UInt(3.W)))
 
     val fbusPortAddr = Option.when(p.enableFloat)(Output(UInt(5.W)))
 
@@ -320,7 +294,8 @@ class Dispatch(p: Parameters) extends Module {
 class DispatchV2(p: Parameters) extends Dispatch(p) {
   // Decode instructions
   val decodedInsts = (0 until p.instructionLanes).map(i =>
-    DecodeInstruction(p, i, io.inst(i).bits.addr, io.inst(i).bits.inst)
+    DecodeInstruction(p, i, io.inst(i).bits.addr, io.inst(i).bits.inst,
+                      io.csrFrm.getOrElse(0.U))
   )
 
   // ---------------------------------------------------------------------------
@@ -535,7 +510,7 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
 
     // -------------------------------------------------------------------------
     // Alu
-    val alu = MuxCase(MakeValid(false.B, AluOp.ADD), Seq(
+    val alu = MuxUpTo1H(MakeValid(false.B, AluOp.ADD), Seq(
         // RV32IM
         (d.auipc || d.addi || d.add) -> MakeValid(true.B, AluOp.ADD),
         d.sub                        -> MakeValid(true.B, AluOp.SUB),
@@ -574,7 +549,7 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
 
     // -------------------------------------------------------------------------
     // Bru
-    val bru = MuxCase(MakeValid(false.B, BruOp.JAL), Seq(
+    val bru = MuxUpTo1H(MakeValid(false.B, BruOp.JAL), Seq(
         d.jal    -> MakeValid(true.B, BruOp.JAL),
         d.jalr   -> MakeValid(true.B, BruOp.JALR),
         d.beq    -> MakeValid(true.B, BruOp.BEQ),
@@ -612,7 +587,7 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
 
     // -------------------------------------------------------------------------
     // Mlu
-    val mlu = MuxCase(MakeValid(false.B, MluOp.MUL), Seq(
+    val mlu = MuxUpTo1H(MakeValid(false.B, MluOp.MUL), Seq(
       d.mul     -> MakeValid(true.B, MluOp.MUL),
       d.mulh    -> MakeValid(true.B, MluOp.MULH),
       d.mulhsu  -> MakeValid(true.B, MluOp.MULHSU),
@@ -624,7 +599,7 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
 
     // -------------------------------------------------------------------------
     // Dvu
-    val dvu = MuxCase(MakeValid(false.B, DvuOp.DIV), Seq(
+    val dvu = MuxUpTo1H(MakeValid(false.B, DvuOp.DIV), Seq(
       d.div  -> MakeValid(true.B, DvuOp.DIV),
       d.divu -> MakeValid(true.B, DvuOp.DIVU),
       d.rem  -> MakeValid(true.B, DvuOp.REM),
@@ -634,10 +609,9 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
     io.dvu(i).bits.addr := rdAddr(i)
     io.dvu(i).bits.op := dvu.bits
 
-
     // -------------------------------------------------------------------------
     // Lsu
-    val lsu = MuxCase(MakeValid(false.B, LsuOp.LB), Seq(
+    val lsu = MuxUpTo1H(MakeValid(false.B, LsuOp.LB), Seq(
       d.lb             -> MakeValid(true.B, LsuOp.LB),
       d.lh             -> MakeValid(true.B, LsuOp.LH),
       d.lw             -> MakeValid(true.B, LsuOp.LW),
@@ -682,7 +656,7 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
     // -------------------------------------------------------------------------
     // Csr
     if (i == 0) {
-      val csr = MuxCase(MakeValid(false.B, CsrOp.CSRRW), Seq(
+      val csr = MuxUpTo1H(MakeValid(false.B, CsrOp.CSRRW), Seq(
         d.csrrw -> MakeValid(true.B, CsrOp.CSRRW),
         d.csrrs -> MakeValid(true.B, CsrOp.CSRRS),
         d.csrrc -> MakeValid(true.B, CsrOp.CSRRC)
@@ -692,6 +666,7 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
       io.csr.valid := tryDispatch && csr.valid && csr_address_valid && (if (p.enableFloat) { io.float.get.ready } else { true.B })
       io.csr.bits.addr := rdAddr(i)
       io.csr.bits.index := csr_bits_index
+      io.csr.bits.rs1 := rs1Addr(i)
       io.csr.bits.op := csr.bits
       io.csrFault(0) := csr.valid && !csr_address_valid && tryDispatch
     } else {
@@ -811,7 +786,8 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
 }
 
 object DecodeInstruction {
-  def apply(p: Parameters, pipeline: Int, addr: UInt, op: UInt): DecodedInstruction = {
+  def apply(p: Parameters, pipeline: Int, addr: UInt, op: UInt,
+            csrFrm: UInt): DecodedInstruction = {
     val d = Wire(new DecodedInstruction(p))
 
     d.inst := op
@@ -917,7 +893,9 @@ object DecodeInstruction {
 
 
     if (p.enableFloat) {
-      d.float.get := FloatInstruction.decode(op, addr)
+      val float = FloatInstruction.decode(op, addr)
+      val floatValid = float.valid && float.bits.validate_csrfrm(csrFrm)
+      d.float.get := MakeValid(floatValid, float.bits)
     }
 
     // Stub out decoder state not used beyond pipeline0.

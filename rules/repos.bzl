@@ -31,9 +31,9 @@ def coralnpu_repos():
 
     http_archive(
         name = "com_google_absl",
-        urls = ["https://storage.googleapis.com/grpc-bazel-mirror/github.com/abseil/abseil-cpp/archive/20230802.0.tar.gz", "https://github.com/abseil/abseil-cpp/archive/20230802.0.tar.gz"],
-        sha256 = "59d2976af9d6ecf001a81a35749a6e551a335b949d34918cfade07737b9d93c5",
-        strip_prefix = "abseil-cpp-20230802.0",
+        urls = ["https://github.com/abseil/abseil-cpp/releases/download/20250127.1/abseil-cpp-20250127.1.tar.gz"],
+        sha256 = "b396401fd29e2e679cace77867481d388c807671dc2acc602a0259eeb79b7811",
+        strip_prefix = "abseil-cpp-20250127.1",
     )
 
     http_archive(
@@ -61,6 +61,8 @@ def coralnpu_repos():
         sha256 = "9d04041ac92a0985e344235f5d946f71ac543f1b1565f2cdbc9a2aaee8adf55b",
         strip_prefix = "rules_python-0.26.0",
         url = "https://github.com/bazelbuild/rules_python/archive/refs/tags/0.26.0.tar.gz",
+        patches = ["@coralnpu_hw//rules:rules_python_airgap.patch"],
+        patch_args = ["-p0"],
     )
 
     http_archive(
@@ -69,7 +71,6 @@ def coralnpu_repos():
         strip_prefix = "pybind11_bazel-2.11.1",
         sha256 = "e8355ee56c2ff772334b4bfa22be17c709e5573f6d1d561c7176312156c27bd4",
     )
-
 
 def coralnpu_repos2():
     """Coralnpu repos are split into two functions; this is to import repositories in order"""
@@ -152,6 +153,27 @@ exports_files(["diplomacy/src/diplomacy/nodes/HeterogeneousBag.scala"])
         """,
     )
 
+    http_archive(
+        name = "riscv-tests",
+        urls = ["https://github.com/riscv-software-src/riscv-tests/archive/fd4e6cdd033d9075632be9dd207c848181ca474c.zip"],
+        sha256 = "e7d84eaa149b57c0e5ff69a76c80f35f4ee64c5dc985dbba5c287adf8b56ec5d",
+        strip_prefix = "riscv-tests-fd4e6cdd033d9075632be9dd207c848181ca474c",
+        patches = [
+            "@coralnpu_hw//third_party/riscv-tests:0001-Find-env-from-environment.patch",
+        ],
+        patch_args = ["-p1"],
+        build_file_content = """
+package(default_visibility = ["//visibility:public"])
+exports_files(glob(["**"]))
+filegroup(
+    name = "all_srcs",
+    srcs = glob([
+        "**/*",
+    ]),
+)
+        """,
+    )
+
 def cvfpu_repos():
     http_archive(
         name = "cvfpu",
@@ -200,9 +222,9 @@ def rvvi_repos():
 def fpga_repos():
     http_archive(
         name = "lowrisc_opentitan_gh",
-        urls = ["https://github.com/lowRISC/opentitan/archive/1b1945fd76799666156f817e163222725c518c59.zip"],
-        sha256 = "b881378cdffee2284a88c2032c9fb13e68c889f1cac38cf715b0cff7b40fcf7e",
-        strip_prefix = "opentitan-1b1945fd76799666156f817e163222725c518c59",
+        urls = ["https://github.com/lowRISC/opentitan/archive/0e3cf62211004443d6d29f8f6120882376da499a.zip"],
+        sha256 = "5de3d4ba7a2d02ea58f189f0d9bc46051368dc138a7f8c0fb89af78dcd43a0f8",
+        strip_prefix = "opentitan-0e3cf62211004443d6d29f8f6120882376da499a",
         patches = [
             "@coralnpu_hw//fpga:0001-Export-hw-ip_templates.patch",
         ],
